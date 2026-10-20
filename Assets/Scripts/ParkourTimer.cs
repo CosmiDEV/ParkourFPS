@@ -1,12 +1,12 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
 
 /// <summary>
 /// Cronómetro del nivel (sin Canvas, igual que SpeedHUD). Va en el objeto Player.
 /// - Arranca solo cuando te mueves por primera vez.
-/// - Se detiene en la meta (FinishZone) y guarda tu mejor tiempo.
+/// - Se detiene en la meta (FinishZone) y guarda tu mejor tiempo por nivel.
 /// - T = reiniciar la carrera desde el inicio (en cualquier momento).
-/// - Enter = reiniciar después de terminar.
 /// </summary>
 public class ParkourTimer : MonoBehaviour
 {
@@ -16,6 +16,8 @@ public class ParkourTimer : MonoBehaviour
     public PlayerRespawn respawn;
     [Tooltip("Identificador para guardar el mejor tiempo de este nivel.")]
     public string levelId = "Level1";
+    [Tooltip("Texto que se muestra al terminar el nivel.")]
+    public string finishHint = "Cruza un portal";
 
     float time;
     float bestTime;
@@ -53,11 +55,7 @@ public class ParkourTimer : MonoBehaviour
         if (running) time += Time.deltaTime;
 
         Keyboard kb = Keyboard.current;
-        if (kb != null)
-        {
-            if (kb.tKey.wasPressedThisFrame) Restart();
-            if (finished && (kb.enterKey.wasPressedThisFrame || kb.numpadEnterKey.wasPressedThisFrame)) Restart();
-        }
+        if (kb != null && kb.tKey.wasPressedThisFrame) Restart();
     }
 
     public void Finish()
@@ -75,16 +73,24 @@ public class ParkourTimer : MonoBehaviour
         }
     }
 
+    /// <summary>Reinicia el nivel desde cero (recarga la escena para dejar todo como al inicio).</summary>
     public void Restart()
     {
+        string scene = SceneManager.GetActiveScene().name;
+        if (Application.CanStreamedLevelBeLoaded(scene))
+        {
+            SceneManager.LoadScene(scene);
+            return;
+        }
+
+        // Plan B si la escena no está en Build Settings: volver al inicio sin recargar
         time = 0f;
         running = false;
         finished = false;
         newRecord = false;
-
         if (respawn != null)
         {
-            respawn.SetCheckpoint(null); // vuelve al inicio
+            respawn.SetCheckpoint(null);
             respawn.Respawn();
         }
         ShowMessage("¡Carrera reiniciada!");
@@ -132,9 +138,11 @@ public class ParkourTimer : MonoBehaviour
         if (finished)
         {
             string title = newRecord ? "¡NUEVO RÉCORD!" : "¡META!";
-            GUI.Label(new Rect(0f, Screen.height * 0.28f, w, 50f), title, centerStyle);
-            GUI.Label(new Rect(0f, Screen.height * 0.28f + 46f, w, 50f), "Tiempo: " + Format(time), centerStyle);
-            GUI.Label(new Rect(0f, Screen.height * 0.28f + 92f, w, 50f), "Enter para reintentar", centerStyle);
+            GUI.Label(new Rect(0f, Screen.height * 0.25f, w, 50f), title, centerStyle);
+            GUI.Label(new Rect(0f, Screen.height * 0.25f + 46f, w, 50f), "Tiempo: " + Format(time), centerStyle);
+            GUI.Label(new Rect(0f, Screen.height * 0.25f + 92f, w, 50f), finishHint, centerStyle);
+            if (Time.time < messageUntil)
+                GUI.Label(new Rect(0f, Screen.height * 0.25f + 138f, w, 50f), message, centerStyle);
         }
     }
 }

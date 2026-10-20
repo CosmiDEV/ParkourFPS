@@ -34,7 +34,9 @@ public class SpeedHUD : MonoBehaviour
             crosshairStyle.normal.textColor = Color.white;
         }
 
-        string state = movement.IsGrounded ? "Suelo"
+        string state = movement.IsSliding ? "Deslizando"
+                     : movement.IsCrouched ? "Agachado"
+                     : movement.IsGrounded ? "Suelo"
                      : movement.IsOnWallAirborne ? "Pared"
                      : "Aire";
 

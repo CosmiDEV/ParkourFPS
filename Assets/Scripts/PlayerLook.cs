@@ -37,7 +37,17 @@ public class PlayerLook : MonoBehaviour
     public float wallTilt = 12f;
     public float tiltSmooth = 10f;
 
+    [Header("Deslizamiento / agacharse")]
+    [Tooltip("Cuánto baja la cámara al deslizarte o agacharte (metros).")]
+    public float crouchCameraDrop = 0.8f;
+    [Tooltip("Qué tan rápido baja/sube la cámara.")]
+    public float crouchCameraSmooth = 14f;
+    [Tooltip("FOV extra mientras te deslizas.")]
+    public float slideFovBoost = 6f;
+
     Camera cam;
+    Vector3 baseLocalPos;
+    float camDrop;
     float yaw;
     float pitch;
     float roll;
@@ -50,6 +60,7 @@ public class PlayerLook : MonoBehaviour
     void Start()
     {
         if (playerBody != null) yaw = playerBody.eulerAngles.y;
+        baseLocalPos = transform.localPosition;
         cam.fieldOfView = baseFov;
         if (lockCursorOnStart) LockCursor(true);
     }
@@ -79,7 +90,7 @@ public class PlayerLook : MonoBehaviour
 
         // FOV según velocidad
         float t = Mathf.InverseLerp(fovMinSpeed, fovMaxSpeed, movement.HorizontalSpeed);
-        float targetFov = baseFov + maxFovBoost * t;
+        float targetFov = baseFov + maxFovBoost * t + (movement.IsSliding ? slideFovBoost : 0f);
         cam.fieldOfView = Mathf.Lerp(cam.fieldOfView, targetFov, 1f - Mathf.Exp(-fovSmooth * dt));
 
         // Inclinación (roll). Si se siente al revés, cambia el signo de los valores.
@@ -88,6 +99,11 @@ public class PlayerLook : MonoBehaviour
             targetRoll = movement.WallSide * wallTilt;
 
         roll = Mathf.Lerp(roll, targetRoll, 1f - Mathf.Exp(-tiltSmooth * dt));
+
+        // Cámara más baja al deslizarte / agacharte
+        float targetDrop = movement.IsCrouched ? crouchCameraDrop : 0f;
+        camDrop = Mathf.Lerp(camDrop, targetDrop, 1f - Mathf.Exp(-crouchCameraSmooth * dt));
+        transform.localPosition = baseLocalPos + Vector3.down * camDrop;
     }
 
     void HandleCursor()
