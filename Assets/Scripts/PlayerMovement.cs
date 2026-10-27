@@ -1,20 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-/// <summary>
-/// Movimiento en primera persona estilo arcade.
-/// Incluye: correr con aceleración, salto con "coyote time" y "jump buffer",
-/// salto variable (más alto si mantienes el botón), doble salto,
-/// deslizamiento en paredes, salto en paredes y DESLIZAMIENTO (slide).
-/// Requiere un CharacterController en el mismo objeto.
-///
-/// Deslizamiento (Ctrl izquierdo o C):
-///  - Corre y presiona Ctrl: te deslizas con un impulso extra.
-///  - Bajando una pendiente ganas velocidad; subiéndola la pierdes.
-///  - Salta mientras te deslizas: "slide jump", conservas (y aumentas) la velocidad.
-///  - Si mantienes Ctrl al aterrizar, aterrizas deslizando (cadena de slide jumps).
-///  - Bajo techos bajos te quedas agachado hasta tener espacio para levantarte.
-/// </summary>
 [RequireComponent(typeof(CharacterController))]
 public class PlayerMovement : MonoBehaviour
 {
@@ -110,7 +96,33 @@ public class PlayerMovement : MonoBehaviour
     [Tooltip("Margen (m) bajo los pies para confirmar que pisas suelo real. Sube si se siente que 'no detecta' el suelo en bordes.")]
     public float groundProbeDistance = 0.2f;
 
-    // --- Estado interno ---
+    [Header("Agua / Nadar")]
+    [Tooltip("Velocidad al nadar (m/s).")]
+    public float swimSpeed = 14f;
+    [Tooltip("Velocidad al subir (Espacio) o bajar (Ctrl / C) en el agua.")]
+    public float swimVerticalSpeed = 4.5f;
+    [Tooltip("Qué tan rápido aceleras nadando.")]
+    public float swimAcceleration = 14f;
+    [Tooltip("Qué tan rápido frenas en el agua al soltar las teclas.")]
+    public float swimDrag = 8f;
+    [Tooltip("Velocidad a la que te hundes lentamente si no haces nada (0 = flotas en el sitio).")]
+    public float idleSinkSpeed = 0.4f;
+    [Tooltip("Cuánto debe estar el centro del cuerpo bajo la superficie para empezar a nadar (m).")]
+    public float swimEnterDepth = 0.1f;
+    [Tooltip("Profundidad del centro del cuerpo cuando flotas en la superficie (m). Con 0.45 la cabeza queda fuera del agua.")]
+    public float surfaceFloatDepth = 0.45f;
+    [Tooltip("Margen sobre la superficie dentro del cual Espacio te hace saltar fuera del agua (m).")]
+    public float surfaceExitMargin = 0.35f;
+    [Tooltip("Velocidad hacia arriba al saltar fuera del agua (para subir a un borde).")]
+    public float waterExitJumpSpeed = 11.5f;
+    [Tooltip("Velocidad hacia adelante mínima al saltar fuera del agua si estás empujando una dirección.")]
+    public float waterExitPush = 6f;
+    [Tooltip("Tiempo tras saltar fuera del agua en el que no puedes volver a entrar a nadar (evita 'pegarte' al agua).")]
+    public float waterExitLockTime = 0.3f;
+    [Tooltip("Cuánta velocidad de caída conservas al caer al agua (0 = frenas de golpe, 1 = nada).")]
+    [Range(0f, 1f)] public float splashDamping = 0.35f;
+
+    // Estado interno
     CharacterController controller;
     Vector3 horizontalVelocity;
     float verticalVelocity;
@@ -123,17 +135,19 @@ public class PlayerMovement : MonoBehaviour
     float airTime;
     int airJumpsUsed;
 
+    // Entrada
     Vector2 moveInput;
     bool jumpPressed;
     bool jumpHeld;
     bool slidePressed;
     bool slideHeld;
 
-    string dbgWallInfo = ""; // DEBUG (temporal)
+    // Paredes
+    string dbgWallInfo = "";
     bool onWall;
-    bool wallPushing; // true si estás empujando hacia la pared
+    bool wallPushing;
     Vector3 wallNormal;
-    float wallSide; // +1 pared a la derecha, -1 a la izquierda, 0 delante/detrás
+    float wallSide;
 
     // Deslizamiento / agachado
     bool sliding;
@@ -144,14 +158,21 @@ public class PlayerMovement : MonoBehaviour
     float standHeight;
     Vector3 standCenter;
     readonly Collider[] overlapBuffer = new Collider[8];
-    const float SlideAirGrace = 0.1f; // segundos en el aire que tolera un slide (baches, uniones de rampas)
+    const float SlideAirGrace = 0.1f;
 
-    // --- Datos para otros scripts (cámara, HUD...) ---
+    // Agua
+    bool swimming;
+    float waterSurfaceY;
+    float swimExitTimer;
+    Transform cameraTransform;
+
+    // Datos para otros scripts
     public float HorizontalSpeed => horizontalVelocity.magnitude;
     public bool IsGrounded => grounded;
     public bool IsOnWallAirborne => onWall && !grounded;
     public bool IsSliding => sliding;
     public bool IsCrouched => crouched;
+    public bool IsSwimming => swimming;
     public float WallSide => wallSide;
     public Vector2 MoveInput => moveInput;
     public int AirJumpsLeft => Mathf.Max(0, maxAirJumps - airJumpsUsed);
@@ -161,22 +182,25 @@ public class PlayerMovement : MonoBehaviour
         controller = GetComponent<CharacterController>();
         standHeight = controller.height;
         standCenter = controller.center;
+
+        Camera cam = GetComponentInChildren<Camera>();
+        if (cam != null) cameraTransform = cam.transform;
     }
 
+    // Ciclo principal
     void Update()
     {
         float dt = Time.deltaTime;
 
         ReadInput();
 
-        // isGrounded también da "true" si la cápsula solo roza el borde de una plataforma en el aire.
-        // Por eso lo confirmamos con rayos hacia abajo y lo descartamos mientras subes.
+        // Suelo
         Vector3 gn = Vector3.up;
         grounded = controller.isGrounded && verticalVelocity <= 0.5f && HasGroundBelow(out gn);
         groundNormal = grounded ? gn : Vector3.up;
         airTime = grounded ? 0f : airTime + dt;
 
-        // DEBUG (temporal): avisa cada vez que el juego decide que tocaste suelo, y qué collider hay debajo
+        // Debug
         if (grounded && !wasGrounded)
         {
             string under = Physics.Raycast(transform.position, Vector3.down, out RaycastHit dbg, 3f, ~0,
@@ -184,16 +208,24 @@ public class PlayerMovement : MonoBehaviour
             Debug.Log($"[DEBUG Suelo] y={transform.position.y:F2} bajo='{under}' airTime previo={airTime:F2}");
         }
 
-        // 1) Estado del suelo
+        // Agua
+        UpdateWaterState(dt);
+        if (swimming)
+        {
+            SwimUpdate(dt);
+            wasGrounded = grounded;
+            return;
+        }
+
+        // Estado del suelo
         if (grounded)
         {
             coyoteCounter = coyoteTime;
             airJumpsUsed = 0;
             if (verticalVelocity < 0f)
             {
-                verticalVelocity = -2f; // mantenerse pegado al suelo
+                verticalVelocity = -2f;
 
-                // En pendientes hacia abajo, empujamos más para no "volar" sobre la rampa
                 Vector3 flat = new Vector3(groundNormal.x, 0f, groundNormal.z);
                 if (flat.sqrMagnitude > 0.0001f && Vector3.Dot(horizontalVelocity, flat) > 0f)
                 {
@@ -208,35 +240,113 @@ public class PlayerMovement : MonoBehaviour
             coyoteCounter -= dt;
         }
 
-        // 2) Deslizamiento / agacharse
+        // Deslizamiento
         UpdateSlideState(dt);
 
-        // 3) Paredes
+        // Paredes
         DetectWall();
 
-        // 4) Saltos
+        // Saltos
         HandleJumps(dt);
 
-        // 5) Movimiento horizontal
+        // Movimiento horizontal
         HandleHorizontal(dt);
 
-        // 6) Gravedad
+        // Gravedad
         HandleGravity(dt);
 
-        // 7) Mover
+        // Mover
         Vector3 motion = horizontalVelocity + Vector3.up * verticalVelocity;
         CollisionFlags flags = controller.Move(motion * dt);
 
         if ((flags & CollisionFlags.Above) != 0 && verticalVelocity > 0f)
-            verticalVelocity = 0f; // golpe contra el techo
+            verticalVelocity = 0f;
 
         wasGrounded = grounded;
     }
 
-    // ------------------------------------------------------------------
-    // Confirma que hay suelo real bajo los pies (5 rayos: centro + 4 alrededor).
-    // Un roce con el borde de una plataforma no cuenta como suelo.
-    // Devuelve también la normal del suelo (para pendientes).
+    // Agua y natación
+    void UpdateWaterState(float dt)
+    {
+        swimExitTimer -= dt;
+        bool wasSwimming = swimming;
+        swimming = false;
+        if (swimExitTimer > 0f) return;
+
+        Vector3 center = transform.position + controller.center;
+        if (WaterVolume.TryGetWater(center, out float surfaceY))
+        {
+            waterSurfaceY = surfaceY;
+            swimming = surfaceY - center.y > swimEnterDepth;
+        }
+
+        if (swimming && !wasSwimming) EnterWater();
+    }
+
+    void EnterWater()
+    {
+        EndSlide();
+        SetCrouched(false);
+        onWall = false;
+        wallPushing = false;
+        airJumpsUsed = 0;
+        coyoteCounter = 0f;
+        jumpBufferCounter = 0f;
+
+        verticalVelocity *= splashDamping;
+        horizontalVelocity *= 0.7f;
+    }
+
+    void SwimUpdate(float dt)
+    {
+        Vector3 center = transform.position + controller.center;
+        float depth = waterSurfaceY - center.y;
+
+        Vector3 fwd = cameraTransform != null ? cameraTransform.forward : transform.forward;
+        Vector3 wish = fwd * moveInput.y + transform.right * moveInput.x;
+        if (wish.sqrMagnitude > 1f) wish.Normalize();
+
+        float vertical = 0f;
+        if (jumpHeld) vertical += 1f;
+        if (slideHeld) vertical -= 1f;
+
+        Vector3 target = wish * swimSpeed + Vector3.up * (vertical * swimVerticalSpeed);
+        bool hasInput = moveInput != Vector2.zero || vertical != 0f;
+        if (!hasInput) target.y = -idleSinkSpeed;
+        target = Vector3.ClampMagnitude(target, Mathf.Max(swimSpeed, swimVerticalSpeed));
+
+        Vector3 v = horizontalVelocity + Vector3.up * verticalVelocity;
+        v = Vector3.MoveTowards(v, target, (hasInput ? swimAcceleration : swimDrag) * dt);
+
+        if (depth <= surfaceFloatDepth && v.y > 0f) v.y = 0f;
+
+        // Salir del agua
+        if (jumpPressed && depth <= surfaceFloatDepth + surfaceExitMargin)
+        {
+            Vector3 flat = transform.right * moveInput.x + transform.forward * moveInput.y;
+            if (flat.sqrMagnitude > 0.01f)
+            {
+                float sp = Mathf.Max(new Vector3(v.x, 0f, v.z).magnitude, waterExitPush);
+                Vector3 f = flat.normalized * sp;
+                v.x = f.x;
+                v.z = f.z;
+            }
+            v.y = waterExitJumpSpeed;
+            swimExitTimer = waterExitLockTime;
+            airJumpsUsed = 0;
+            coyoteCounter = 0f;
+            jumpBufferCounter = 0f;
+        }
+
+        horizontalVelocity = new Vector3(v.x, 0f, v.z);
+        verticalVelocity = v.y;
+
+        CollisionFlags flags = controller.Move(v * dt);
+        if ((flags & CollisionFlags.Above) != 0 && verticalVelocity > 0f)
+            verticalVelocity = 0f;
+    }
+
+    // Detección de suelo
     bool HasGroundBelow(out Vector3 normal)
     {
         normal = Vector3.up;
@@ -262,7 +372,7 @@ public class PlayerMovement : MonoBehaviour
         return false;
     }
 
-    // ------------------------------------------------------------------
+    // Entrada
     void ReadInput()
     {
         moveInput = Vector2.zero;
@@ -287,9 +397,7 @@ public class PlayerMovement : MonoBehaviour
         slideHeld = kb.leftCtrlKey.isPressed || kb.cKey.isPressed;
     }
 
-    // ------------------------------------------------------------------
     // Deslizamiento y agachado
-    // ------------------------------------------------------------------
     void UpdateSlideState(float dt)
     {
         slideCooldownTimer -= dt;
@@ -309,15 +417,13 @@ public class PlayerMovement : MonoBehaviour
         }
         else if (grounded && slideHeld)
         {
-            // Empezar: al presionar Ctrl (o guardado en el buffer), o al aterrizar con Ctrl sostenido
             bool wantsSlide = slideBufferCounter > 0f || landed;
             if (wantsSlide && speed >= slideMinSpeed && slideCooldownTimer <= 0f)
                 StartSlide();
             else
-                SetCrouched(true); // muy lento o en cooldown: solo agacharse
+                SetCrouched(true);
         }
 
-        // Levantarse: al soltar Ctrl, o si estás en el aire. Solo si hay espacio arriba.
         if (!sliding && crouched && (!slideHeld || !grounded) && CanStand())
             SetCrouched(false);
     }
@@ -344,18 +450,14 @@ public class PlayerMovement : MonoBehaviour
 
     void SlideMove(float dt, Vector3 wish, bool hasInput)
     {
-        // Solo hay física de slide pegado al suelo; en el aire (tolerancia corta) conservas el impulso.
         if (!grounded) return;
 
-        // Gravedad a lo largo de la pendiente (solo la parte horizontal)
         Vector3 slopeAccel = Vector3.ProjectOnPlane(Vector3.down * gravity, groundNormal);
         slopeAccel.y = 0f;
         horizontalVelocity += slopeAccel * slopeGain * dt;
 
-        // Fricción
         float sp = Mathf.Max(0f, horizontalVelocity.magnitude - slideFriction * dt);
 
-        // Dirección: giras un poco hacia donde apuntas con las teclas
         Vector3 dir = horizontalVelocity.sqrMagnitude > 0.0001f ? horizontalVelocity.normalized : transform.forward;
         if (hasInput)
             dir = Vector3.RotateTowards(dir, wish.normalized, slideSteer * Mathf.Deg2Rad * dt, 0f);
@@ -368,13 +470,11 @@ public class PlayerMovement : MonoBehaviour
         if (crouched == value) return;
         crouched = value;
 
-        // Mantenemos los pies en el mismo lugar: bajamos el techo de la cápsula
         float h = value ? slideHeight : standHeight;
         controller.height = h;
         controller.center = standCenter + Vector3.down * ((standHeight - h) * 0.5f);
     }
 
-    /// <summary>¿Hay espacio para volver a la altura normal?</summary>
     bool CanStand()
     {
         if (!crouched) return true;
@@ -395,7 +495,7 @@ public class PlayerMovement : MonoBehaviour
         return true;
     }
 
-    // ------------------------------------------------------------------
+    // Paredes
     void DetectWall()
     {
         onWall = false;
@@ -403,9 +503,6 @@ public class PlayerMovement : MonoBehaviour
         wallSide = 0f;
         if (grounded) return;
 
-        // controller.isGrounded parpadea a veces (1 frame en "false" aunque pises el suelo).
-        // Para no activar el modo pared por error, exigimos llevar un rato en el aire
-        // y estar a cierta altura sobre el suelo.
         if (airTime < wallMinAirTime) return;
         float probe = controller.height * 0.5f + wallMinHeight;
         if (Physics.Raycast(transform.position, Vector3.down, probe, wallMask, QueryTriggerInteraction.Ignore))
@@ -419,7 +516,6 @@ public class PlayerMovement : MonoBehaviour
             Vector3 dir = GetDirection(i);
             if (RaycastIgnoreSelf(transform.position, dir, dist, wallMask, out RaycastHit hit))
             {
-                // Solo superficies casi verticales cuentan como pared
                 if (Mathf.Abs(hit.normal.y) > 0.3f) continue;
 
                 if (hit.distance < best)
@@ -442,7 +538,6 @@ public class PlayerMovement : MonoBehaviour
         }
     }
 
-    // Rayo que ignora el collider del propio jugador (el rayo sale del centro de la cápsula y se golpeaba a sí mismo)
     readonly RaycastHit[] rayBuffer = new RaycastHit[8];
     bool RaycastIgnoreSelf(Vector3 origin, Vector3 dir, float dist, int mask, out RaycastHit best)
     {
@@ -470,7 +565,7 @@ public class PlayerMovement : MonoBehaviour
         }
     }
 
-    // ------------------------------------------------------------------
+    // Saltos
     void HandleJumps(float dt)
     {
         if (jumpPressed) jumpBufferCounter = jumpBufferTime;
@@ -480,13 +575,12 @@ public class PlayerMovement : MonoBehaviour
 
         if (jumpBufferCounter > 0f && coyoteCounter > 0f && CanStand())
         {
-            // Salto normal (suelo o recién dejado el borde)
+            // Salto normal
             Debug.Log($"[DEBUG Salto] 1-SUELO/COYOTE  grounded={grounded} coyote={coyoteCounter:F3} airJumpsUsed={airJumpsUsed} y={transform.position.y:F2}");
             verticalVelocity = JumpVelocity();
             jumpBufferCounter = 0f;
             coyoteCounter = 0f;
 
-            // Slide jump: conservas el impulso del slide y lo aumentas un poco
             if (sliding)
             {
                 float sp = horizontalVelocity.magnitude;
@@ -511,7 +605,7 @@ public class PlayerMovement : MonoBehaviour
         }
         else if (jumpPressed && !grounded && airJumpsUsed < maxAirJumps)
         {
-            // Doble salto (solo con una pulsación nueva)
+            // Doble salto
             Debug.Log($"[DEBUG Salto] 3-AIRE (doble)  usados antes={airJumpsUsed} y={transform.position.y:F2}");
             verticalVelocity = JumpVelocity() * airJumpMultiplier;
             airJumpsUsed++;
@@ -524,7 +618,7 @@ public class PlayerMovement : MonoBehaviour
         return Mathf.Sqrt(2f * gravity * jumpHeight);
     }
 
-    // ------------------------------------------------------------------
+    // Movimiento horizontal
     void HandleHorizontal(float dt)
     {
         Vector3 wish = transform.right * moveInput.x + transform.forward * moveInput.y;
@@ -542,7 +636,6 @@ public class PlayerMovement : MonoBehaviour
             Vector3 target = wish * topSpeed;
             float accel = hasInput ? groundAcceleration : groundDeceleration;
 
-            // Si vas más rápido que el máximo (salida de un slide) frenas suave, no de golpe
             if (hasInput && horizontalVelocity.magnitude > topSpeed * 1.02f)
                 accel = overspeedDeceleration;
 
@@ -552,7 +645,6 @@ public class PlayerMovement : MonoBehaviour
         {
             if (hasInput)
             {
-                // Control aéreo: empujas hacia donde apuntas sin perder el impulso que ya llevas
                 Vector3 wishDir = wish.normalized;
                 float current = Vector3.Dot(horizontalVelocity, wishDir);
                 float add = Mathf.Min(airAcceleration * dt, Mathf.Max(0f, maxSpeed - current));
@@ -565,7 +657,7 @@ public class PlayerMovement : MonoBehaviour
         }
     }
 
-    // ------------------------------------------------------------------
+    // Gravedad
     void HandleGravity(float dt)
     {
         float g = gravity;
@@ -575,13 +667,11 @@ public class PlayerMovement : MonoBehaviour
         verticalVelocity -= g * dt;
         verticalVelocity = Mathf.Max(verticalVelocity, -maxFallSpeed);
 
-        // Deslizamiento lento por la pared
         if (onWall && !grounded && (wallPushing || !wallSlideNeedsInput) && verticalVelocity < -wallSlideSpeed)
             verticalVelocity = -wallSlideSpeed;
     }
 
-    // ------------------------------------------------------------------
-    // Al chocar de lado con una pared, quitamos la velocidad que empuja contra ella
+    // Colisiones
     void OnControllerColliderHit(ControllerColliderHit hit)
     {
         if (Mathf.Abs(hit.normal.y) < 0.3f)
@@ -592,7 +682,7 @@ public class PlayerMovement : MonoBehaviour
         }
     }
 
-    /// <summary>Detiene todo el movimiento (lo usa el reaparecer).</summary>
+    // Reinicio de estado
     public void ResetState()
     {
         horizontalVelocity = Vector3.zero;
@@ -609,5 +699,8 @@ public class PlayerMovement : MonoBehaviour
         SetCrouched(false);
         wasGrounded = false;
         groundNormal = Vector3.up;
+
+        swimming = false;
+        swimExitTimer = 0f;
     }
 }

@@ -2,12 +2,6 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
 
-/// <summary>
-/// Cronómetro del nivel (sin Canvas, igual que SpeedHUD). Va en el objeto Player.
-/// - Arranca solo cuando te mueves por primera vez.
-/// - Se detiene en la meta (FinishZone) y guarda tu mejor tiempo por nivel.
-/// - T = reiniciar la carrera desde el inicio (en cualquier momento).
-/// </summary>
 public class ParkourTimer : MonoBehaviour
 {
     public static ParkourTimer Instance { get; private set; }
@@ -58,6 +52,7 @@ public class ParkourTimer : MonoBehaviour
         if (kb != null && kb.tKey.wasPressedThisFrame) Restart();
     }
 
+    // Control de la carrera
     public void Finish()
     {
         if (finished) return;
@@ -73,7 +68,6 @@ public class ParkourTimer : MonoBehaviour
         }
     }
 
-    /// <summary>Reinicia el nivel desde cero (recarga la escena para dejar todo como al inicio).</summary>
     public void Restart()
     {
         string scene = SceneManager.GetActiveScene().name;
@@ -83,7 +77,6 @@ public class ParkourTimer : MonoBehaviour
             return;
         }
 
-        // Plan B si la escena no está en Build Settings: volver al inicio sin recargar
         time = 0f;
         running = false;
         finished = false;
@@ -96,6 +89,7 @@ public class ParkourTimer : MonoBehaviour
         ShowMessage("¡Carrera reiniciada!");
     }
 
+    // Mensajes y formato
     public void ShowMessage(string text, float seconds = 2f)
     {
         message = text;
@@ -110,6 +104,7 @@ public class ParkourTimer : MonoBehaviour
         return string.Format("{0:00}:{1:00}.{2:00}", m, s, cs);
     }
 
+    // Interfaz
     void OnGUI()
     {
         if (timeStyle == null)

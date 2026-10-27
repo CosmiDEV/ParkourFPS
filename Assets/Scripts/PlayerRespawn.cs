@@ -1,10 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-/// <summary>
-/// Reaparece al jugador si cae por debajo de cierta altura o si presiona R.
-/// Si no asignas un punto de reaparición, usa la posición inicial.
-/// </summary>
 [RequireComponent(typeof(CharacterController))]
 [RequireComponent(typeof(PlayerMovement))]
 public class PlayerRespawn : MonoBehaviour
@@ -36,7 +32,7 @@ public class PlayerRespawn : MonoBehaviour
             Respawn();
     }
 
-    /// <summary>Cambia el punto de reaparición (útil para checkpoints en el futuro).</summary>
+    // Reaparición
     public void SetCheckpoint(Transform newPoint)
     {
         respawnPoint = newPoint;
@@ -47,7 +43,6 @@ public class PlayerRespawn : MonoBehaviour
         Vector3 pos = respawnPoint != null ? respawnPoint.position : startPosition;
         float yaw = respawnPoint != null ? respawnPoint.eulerAngles.y : startYaw;
 
-        // El CharacterController hay que apagarlo para poder teletransportar
         controller.enabled = false;
         transform.position = pos;
         controller.enabled = true;

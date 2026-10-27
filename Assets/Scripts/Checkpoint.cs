@@ -1,10 +1,5 @@
 using UnityEngine;
 
-/// <summary>
-/// Checkpoint: al tocarlo, el jugador reaparecerá aquí (tecla R o al caer).
-/// Usa el SetCheckpoint() que ya tiene PlayerRespawn.
-/// Necesita un Collider con "Is Trigger" activado.
-/// </summary>
 [RequireComponent(typeof(Collider))]
 public class Checkpoint : MonoBehaviour
 {
@@ -24,6 +19,7 @@ public class Checkpoint : MonoBehaviour
         Paint(inactiveColor);
     }
 
+    // Activación
     void OnTriggerEnter(Collider other)
     {
         PlayerRespawn respawn = other.GetComponent<PlayerRespawn>();
@@ -40,6 +36,7 @@ public class Checkpoint : MonoBehaviour
         }
     }
 
+    // Visual
     void Paint(Color c)
     {
         if (flagRenderers == null) return;

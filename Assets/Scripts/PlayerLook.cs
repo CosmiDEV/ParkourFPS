@@ -1,13 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-/// <summary>
-/// Cámara en primera persona. Va en la cámara (hija del jugador).
-/// - Mirada con el mouse (el cuerpo gira en horizontal, la cámara en vertical).
-/// - FOV que aumenta con la velocidad.
-/// - Inclinación leve al moverte de lado y más marcada en paredes.
-/// Sin suavizado en la mirada a propósito: la respuesta es inmediata.
-/// </summary>
 [RequireComponent(typeof(Camera))]
 public class PlayerLook : MonoBehaviour
 {
@@ -69,6 +62,7 @@ public class PlayerLook : MonoBehaviour
     {
         HandleCursor();
 
+        // Mirada
         if (Cursor.lockState == CursorLockMode.Locked && Mouse.current != null)
         {
             Vector2 delta = Mouse.current.delta.ReadValue();
@@ -84,28 +78,30 @@ public class PlayerLook : MonoBehaviour
         transform.localRotation = Quaternion.Euler(pitch, 0f, roll);
     }
 
+    // Efectos de cámara
     void UpdateEffects(float dt)
     {
         if (movement == null) return;
 
-        // FOV según velocidad
+        // FOV
         float t = Mathf.InverseLerp(fovMinSpeed, fovMaxSpeed, movement.HorizontalSpeed);
         float targetFov = baseFov + maxFovBoost * t + (movement.IsSliding ? slideFovBoost : 0f);
         cam.fieldOfView = Mathf.Lerp(cam.fieldOfView, targetFov, 1f - Mathf.Exp(-fovSmooth * dt));
 
-        // Inclinación (roll). Si se siente al revés, cambia el signo de los valores.
+        // Inclinación
         float targetRoll = -movement.MoveInput.x * strafeTilt;
         if (movement.IsOnWallAirborne && movement.WallSide != 0f)
             targetRoll = movement.WallSide * wallTilt;
 
         roll = Mathf.Lerp(roll, targetRoll, 1f - Mathf.Exp(-tiltSmooth * dt));
 
-        // Cámara más baja al deslizarte / agacharte
+        // Altura de cámara
         float targetDrop = movement.IsCrouched ? crouchCameraDrop : 0f;
         camDrop = Mathf.Lerp(camDrop, targetDrop, 1f - Mathf.Exp(-crouchCameraSmooth * dt));
         transform.localPosition = baseLocalPos + Vector3.down * camDrop;
     }
 
+    // Cursor
     void HandleCursor()
     {
         if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
@@ -122,7 +118,6 @@ public class PlayerLook : MonoBehaviour
         Cursor.visible = !locked;
     }
 
-    /// <summary>Gira al jugador a un ángulo horizontal (lo usa el reaparecer).</summary>
     public void SetYaw(float newYaw)
     {
         yaw = newYaw;

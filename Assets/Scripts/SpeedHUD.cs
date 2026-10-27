@@ -1,9 +1,5 @@
 using UnityEngine;
 
-/// <summary>
-/// HUD de prueba (no necesita Canvas): muestra velocidad, estado y una mira en el centro.
-/// Sirve para afinar las sensaciones del movimiento. Va en el objeto Player.
-/// </summary>
 public class SpeedHUD : MonoBehaviour
 {
     public PlayerMovement movement;
@@ -20,6 +16,7 @@ public class SpeedHUD : MonoBehaviour
     {
         if (movement == null) return;
 
+        // Estilos
         if (labelStyle == null)
         {
             labelStyle = new GUIStyle(GUI.skin.label) { fontSize = 22, fontStyle = FontStyle.Bold };
@@ -34,12 +31,15 @@ public class SpeedHUD : MonoBehaviour
             crosshairStyle.normal.textColor = Color.white;
         }
 
-        string state = movement.IsSliding ? "Deslizando"
+        // Estado
+        string state = movement.IsSwimming ? "Nadando"
+                     : movement.IsSliding ? "Deslizando"
                      : movement.IsCrouched ? "Agachado"
                      : movement.IsGrounded ? "Suelo"
                      : movement.IsOnWallAirborne ? "Pared"
                      : "Aire";
 
+        // Textos y mira
         GUI.Label(new Rect(20, 20, 600, 36), $"Velocidad: {movement.HorizontalSpeed:F1} m/s", labelStyle);
         GUI.Label(new Rect(20, 54, 600, 36), $"Estado: {state}", labelStyle);
         GUI.Label(new Rect(20, 88, 600, 36), $"Dobles saltos: {movement.AirJumpsLeft}", labelStyle);

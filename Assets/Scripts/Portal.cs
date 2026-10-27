@@ -1,11 +1,6 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-/// <summary>
-/// Portal: al cruzarlo carga otra escena (o reinicia la actual).
-/// Las escenas deben estar en File > Build Settings (el creador de niveles lo hace solo).
-/// Necesita un Collider con "Is Trigger" activado.
-/// </summary>
 [RequireComponent(typeof(Collider))]
 public class Portal : MonoBehaviour
 {
@@ -39,6 +34,7 @@ public class Portal : MonoBehaviour
         if (pulseTarget != null) baseScale = pulseTarget.localScale;
     }
 
+    // Animación
     void Update()
     {
         if (pulseTarget == null) return;
@@ -46,9 +42,9 @@ public class Portal : MonoBehaviour
         pulseTarget.localScale = baseScale * s;
     }
 
+    // Uso del portal
     void OnTriggerEnter(Collider other) { TryUse(other); }
 
-    // Stay: por si el jugador ya estaba dentro cuando el portal terminó de armarse
     void OnTriggerStay(Collider other) { TryUse(other); }
 
     void TryUse(Collider other)

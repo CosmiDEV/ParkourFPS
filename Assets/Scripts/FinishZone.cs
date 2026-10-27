@@ -1,9 +1,5 @@
 using UnityEngine;
 
-/// <summary>
-/// Meta del nivel: al entrar el jugador se detiene el cronómetro
-/// y aparecen los portales (siguiente nivel / reintentar).
-/// </summary>
 [RequireComponent(typeof(Collider))]
 public class FinishZone : MonoBehaviour
 {
